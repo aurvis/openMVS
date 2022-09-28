@@ -319,6 +319,7 @@ bool DepthMapsData::InitViews(DepthData& depthData, IIndex idxNeighbor, IIndex n
 		DepthData::ViewData& viewTrg = depthData.images.AddEmpty();
 		viewTrg.pImageData = &scene.images[neighbor.idx.ID];
 		viewTrg.scale = neighbor.idx.scale;
+		ASSERT(viewTrg.scale > 0.0);
 		viewTrg.camera = viewTrg.pImageData->camera;
 		if (loadImages) {
 			viewTrg.pImageData->image.toGray(viewTrg.image, cv::COLOR_BGR2GRAY, true);
@@ -340,6 +341,7 @@ bool DepthMapsData::InitViews(DepthData& depthData, IIndex idxNeighbor, IIndex n
 			DepthData::ViewData& viewTrg = depthData.images.AddEmpty();
 			viewTrg.pImageData = &scene.images[neighbor.idx.ID];
 			viewTrg.scale = neighbor.idx.scale;
+			ASSERT(viewTrg.scale > 0.0);
 			viewTrg.camera = viewTrg.pImageData->camera;
 			if (loadImages) {
 				viewTrg.pImageData->image.toGray(viewTrg.image, cv::COLOR_BGR2GRAY, true);
@@ -631,7 +633,7 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage, int nGeometricIter)
 		threads.resize(nMaxThreads-1); // current thread is also used
 	volatile Thread::safe_t idxPixel;
 
-	// Multi-Resolution : 
+	// Multi-Resolution :
 	DepthData& fullResDepthData(arrDepthData[idxImage]);
 	const unsigned totalScaleNumber(nGeometricIter < 0 ? OPTDENSE::nSubResolutionLevels : 0u);
 	DepthMap lowResDepthMap;
@@ -938,7 +940,7 @@ bool DepthMapsData::GapInterpolation(DepthData& depthData)
 					const Depth avg((depthFirst+depth)*0.5f);
 					do {
 						depthMap(v,u_curr) = avg;
-					} while (++u_curr<u);						
+					} while (++u_curr<u);
 					#else
 					// interpolate values
 					const Depth diff((depth-depthFirst)/(count+1));
@@ -948,7 +950,7 @@ bool DepthMapsData::GapInterpolation(DepthData& depthData)
 						do {
 							depthMap(v,u_curr) = (d+=diff);
 							if (!confMap.empty()) confMap(v,u_curr) = c;
-						} while (++u_curr<u);						
+						} while (++u_curr<u);
 					} else {
 						Point2f dir1, dir2;
 						Normal2Dir(normalMap(v,u_first), dir1);
@@ -959,7 +961,7 @@ bool DepthMapsData::GapInterpolation(DepthData& depthData)
 							dir1 += dirDiff;
 							Dir2Normal(dir1, normalMap(v,u_curr));
 							if (!confMap.empty()) confMap(v,u_curr) = c;
-						} while (++u_curr<u);						
+						} while (++u_curr<u);
 					}
 					#endif
 				}
@@ -1004,7 +1006,7 @@ bool DepthMapsData::GapInterpolation(DepthData& depthData)
 					const Depth avg((depthFirst+depth)*0.5f);
 					do {
 						depthMap(v_curr,u) = avg;
-					} while (++v_curr<v);						
+					} while (++v_curr<v);
 					#else
 					// interpolate values
 					const Depth diff((depth-depthFirst)/(count+1));
@@ -1014,7 +1016,7 @@ bool DepthMapsData::GapInterpolation(DepthData& depthData)
 						do {
 							depthMap(v_curr,u) = (d+=diff);
 							if (!confMap.empty()) confMap(v_curr,u) = c;
-						} while (++v_curr<v);						
+						} while (++v_curr<v);
 					} else {
 						Point2f dir1, dir2;
 						Normal2Dir(normalMap(v_first,u), dir1);
@@ -1025,7 +1027,7 @@ bool DepthMapsData::GapInterpolation(DepthData& depthData)
 							dir1 += dirDiff;
 							Dir2Normal(dir1, normalMap(v_curr,u));
 							if (!confMap.empty()) confMap(v_curr,u) = c;
-						} while (++v_curr<v);						
+						} while (++v_curr<v);
 					}
 					#endif
 				}
@@ -1693,7 +1695,7 @@ bool Scene::ComputeDepthMaps(DenseDepthMapData& data)
 		SampleMeshWithVisibility();
 		mesh.Release();
 	}
-	
+
 	// compute point-cloud from the existing mesh
 	if (IsEmpty() && !ImagesHaveNeighbors()) {
 		VERBOSE("warning: empty point-cloud, rough neighbor views selection based on image pairs baseline");
@@ -1815,6 +1817,8 @@ bool Scene::ComputeDepthMaps(DenseDepthMapData& data)
 	}
 	#endif // _USE_CUDA
 
+	VERBOSE("Computing depth maps - begins");
+
 	// initialize the queue of images to be processed
 	const int nOptimize(OPTDENSE::nOptimize);
 	if (OPTDENSE::nEstimationGeometricIters && data.nFusionMode >= 0)
@@ -1836,6 +1840,9 @@ bool Scene::ComputeDepthMaps(DenseDepthMapData& data)
 		// single-thread execution
 		DenseReconstructionEstimate((void*)&data);
 	}
+	VERBOSE("Computing depth maps - done");
+
+
 	GET_LOGCONSOLE().Play();
 	if (!data.events.IsEmpty())
 		return false;
@@ -1926,6 +1933,7 @@ void* DenseReconstructionEstimateTmp(void* arg) {
 // initialize the dense reconstruction with the sparse point cloud
 void Scene::DenseReconstructionEstimate(void* pData)
 {
+	VERBOSE("DenseReconstructionEstimate - begins");
 	DenseDepthMapData& data = *((DenseDepthMapData*)pData);
 	while (true) {
 		CAutoPtr<Event> evt(data.events.GetEvent());
@@ -2058,6 +2066,7 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			ASSERT("Should not happen!" == NULL);
 		}
 	}
+	VERBOSE("DenseReconstructionEstimate - done");
 } // DenseReconstructionEstimate
 /*----------------------------------------------------------------*/
 

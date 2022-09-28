@@ -406,7 +406,7 @@ bool Scene::LoadDMAP(const String& fileName)
 // each line store the view ID followed by the 3+ closest view IDs, ordered in decreasing overlap:
 //
 // <cam-id> <neighbor-cam-id-0> <neighbor-cam-id-1> <neighbor-cam-id-2> <...>
-// 
+//
 // for example:
 // 0 1 2 3 4
 // 1 0 2 3 4
@@ -808,7 +808,7 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 		float score;
 		float avgScale;
 		float avgAngle;
-		uint32_t points;
+		CLISTDEF0(uint32_t) points;
 	};
 	CLISTDEF0(Score) scores(images.GetSize());
 	scores.Memset(0);
@@ -831,10 +831,13 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 				continue;
 			wROI = 0.7f;
 		}
+		float pDepth = (float)imageData.camera.PointDepth(point);
+		if( pDepth < FLT_EPSILON)
+			continue;
 		// store this point
 		if (views.GetSize() >= nMinPointViews)
 			points.Insert((uint32_t)idx);
-		imageData.avgDepth += (float)imageData.camera.PointDepth(point);
+		imageData.avgDepth += pDepth;
 		++nPoints;
 		// score shared views
 		const Point3f V1(imageData.camera.C - Cast<REAL>(point));
@@ -846,6 +849,9 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 			const Point3f V2(imageData2.camera.C - Cast<REAL>(point));
 			const float fAngle(ACOS(ComputeAngle(V1.ptr(), V2.ptr())));
 			const float wAngle(EXP(SQUARE(fAngle-fOptimAngle)*(fAngle<fOptimAngle?sigmaAngleSmall:sigmaAngleLarge)));
+			float pDepth2 = (float)imageData2.camera.PointDepth(point);
+			if( pDepth2 <= FLT_EPSILON )
+				continue;
 			const float footprint2(Footprint(imageData2.camera, point));
 			const float fScaleRatio(footprint1/footprint2);
 			float wScale;
@@ -855,12 +861,20 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 				wScale = 1.f;
 			else
 				wScale = SQUARE(fScaleRatio);
+			if( fScaleRatio <= 0.0 ) {
+				printf("ERROR: [FrameID %d] Invalid point! [point idx %ld] [neighbour view id %d] [fscaleratio %f]", ID, idx, view, fScaleRatio);
+				continue;
+			}
 			Score& score = scores[view];
 			score.score += MAXF(wAngle,0.1f) * wScale * wROI;
 			score.avgScale += fScaleRatio;
 			score.avgAngle += fAngle;
-			++score.points;
+			score.points.Insert((uint32_t)idx);
 		}
+	}
+	if(nPoints<=3) {
+		imageData.avgDepth = 0.0;
+		return false;
 	}
 	imageData.avgDepth /= nPoints;
 	ASSERT(nPoints > 3);
@@ -872,14 +886,14 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 		if (!imageDataB.IsValid())
 			continue;
 		const Score& score = scores[IDB];
-		if (score.points < 3)
+		if (score.points.GetSize() < 3)
 			continue;
 		ASSERT(ID != IDB);
 		// compute how well the matched features are spread out (image covered area)
 		const Point2f boundsA(imageData.GetSize());
 		const Point2f boundsB(imageDataB.GetSize());
 		ASSERT(projs.IsEmpty());
-		for (uint32_t idx: points) {
+		for (uint32_t idx: score.points) {
 			const PointCloud::ViewArr& views = pointcloud.pointViews[idx];
 			ASSERT(views.IsSorted());
 			ASSERT(views.FindFirst(ID) != PointCloud::ViewArr::NO_INDEX);
@@ -891,7 +905,10 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 			if (!imageData.camera.IsInside(ptA, boundsA) || !imageDataB.camera.IsInside(ptB, boundsB))
 				projs.RemoveLast();
 		}
-		ASSERT(projs.GetSize() <= score.points);
+		if( projs.GetSize() > score.points.GetSize() ) {
+			printf("ERROR [FrameID %d] [IDB %d] Invalid here!\n ", ID, IDB);
+		}
+		ASSERT(projs.GetSize() <= score.points.GetSize());
 		if (projs.IsEmpty())
 			continue;
 		const float area(ComputeCoveredArea<float,2,16,false>((const float*)projs.Begin(), projs.GetSize(), boundsA.ptr()));
@@ -899,9 +916,9 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 		// store image score
 		ViewScore& neighbor = neighbors.AddEmpty();
 		neighbor.idx.ID = IDB;
-		neighbor.idx.points = score.points;
-		neighbor.idx.scale = score.avgScale/score.points;
-		neighbor.idx.angle = score.avgAngle/score.points;
+		neighbor.idx.points = score.points.GetSize();
+		neighbor.idx.scale = score.avgScale/score.points.GetSize();
+		neighbor.idx.angle = score.avgAngle/score.points.GetSize();
 		neighbor.idx.area = area;
 		neighbor.score = score.score*MAXF(area,0.01f);
 	}
